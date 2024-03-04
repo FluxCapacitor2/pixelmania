@@ -1,8 +1,10 @@
 import { Dispatch } from "react";
 
 export const ColorPicker = ({
+  color: current,
   setColor,
 }: {
+  color: string | null;
   setColor: Dispatch<string | null>;
 }) => {
   const colors = [
@@ -23,8 +25,10 @@ export const ColorPicker = ({
       {colors.map((color) => (
         <button
           key={color}
-          className={`w-5 h-5 rounded-md ${
-            color === null && "border-2 border-black"
+          className={`border-2 w-5 h-5 rounded-md ${
+            color === null || color === current
+              ? "border-black"
+              : "border-transparent"
           }`}
           style={{ backgroundColor: color ?? "transparent" }}
           onClick={() => setColor(color)}

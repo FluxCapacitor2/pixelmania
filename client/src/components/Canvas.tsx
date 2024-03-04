@@ -257,9 +257,9 @@ export const Canvas = () => {
           onTouchEnd={() => setDrawing(false)}
         />
         <div className="flex gap-4 items-center">
-          <BrushSizePicker setThickness={setThickness} />
+          <BrushSizePicker thickness={thickness} setThickness={setThickness} />
           <div className="w-px h-full scale-y-125 bg-gray-400">&nbsp;</div>
-          <ColorPicker setColor={setColor} />
+          <ColorPicker color={color} setColor={setColor} />
         </div>
         {transactionId === null && (
           <div className="flex gap-2">
