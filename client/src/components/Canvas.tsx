@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import toast from "react-hot-toast";
 import useWebSocket, { ReadyState } from "react-use-websocket";
 import { BrushSizePicker } from "./BrushSizePicker";
 import { ColorPicker } from "./ColorPicker";
@@ -60,7 +61,7 @@ export const Canvas = () => {
     { id: string; pixelCount: number }[]
   >([]);
 
-  const [pricePerPixel, setPrice] = useState(1 / 50);
+  const [pricePerPixel, setPrice] = useState(1 / 75);
 
   useEffect(() => {
     if (!lastJsonMessage) return;
@@ -85,18 +86,18 @@ export const Canvas = () => {
     } else if (lastJsonMessage.action === "approveTransaction") {
       // The transaction was approved!
       setTransactionId(null);
-      alert("Transaction approved!");
+      toast.success("Transaction approved!");
     } else if (lastJsonMessage.action === "denyTransaction") {
       setTransactionId(null);
-      alert(
+      toast.error(
         "Your transaction was denied. Please visit the table for more information."
       );
     } else if (lastJsonMessage.action === "login") {
       if (lastJsonMessage.result === "success") {
-        alert("You are now logged in as an admin.");
+        toast.success("You are now logged in as an admin.");
         setIsAdmin(true);
       } else {
-        alert("Incorrect password");
+        toast.error("Incorrect password");
       }
     } else if (lastJsonMessage.action === "newTransaction") {
       if (!isAdmin) {
@@ -136,13 +137,10 @@ export const Canvas = () => {
     ];
     setLastDrawPos([x, y]);
 
-    console.log(lastDrawPos, [x, y]);
-
     if (lastDrawPos) {
       const dx = x - lastDrawPos[0];
       const dy = y - lastDrawPos[1];
       let greatestDifferential = Math.max(Math.abs(dx), Math.abs(dy));
-      console.log("delta", dx, dy, "0<=t<=", greatestDifferential);
       for (let t = 0; t < Math.abs(greatestDifferential); t++) {
         paintPixel(
           lastDrawPos[0] + (dx / greatestDifferential) * t,
@@ -164,8 +162,10 @@ export const Canvas = () => {
     let pixelsToAdd: { x: number; y: number; color: string }[] = [];
     for (let dx = -thickness; dx < thickness; dx++) {
       for (let dy = -thickness; dy < thickness; dy++) {
-        if (x + dx < 0 || x + dx > width || y + dy < 0 || y + dy > height)
+        if (x + dx < 0 || x + dx > width || y + dy < 0 || y + dy > height) {
+          // Don't paint pixels out of bounds
           continue;
+        }
 
         pixelsToAdd.push({
           x: Math.round(x + dx),
@@ -287,7 +287,7 @@ export const Canvas = () => {
               if (e.key === "Enter") {
                 sendJsonMessage({
                   action: "setPrice",
-                  price: e.currentTarget.valueAsNumber,
+                  price: parseFloat(e.currentTarget.value),
                 });
               }
             }}

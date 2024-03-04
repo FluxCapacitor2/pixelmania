@@ -1,9 +1,11 @@
+import { Toaster } from "react-hot-toast";
 import "./App.css";
 import { Canvas } from "./components/Canvas";
 
 function App() {
   return (
     <>
+      <Toaster position="top-center" />
       <h1 className="font-mono text-2xl font-bold text-center mb-4">
         PixelMania
       </h1>

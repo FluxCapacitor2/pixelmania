@@ -22,12 +22,12 @@ const server = Bun.serve({
     if (server.upgrade(req)) {
       return; // do not return a Response
     }
-    return new Response("Upgrade failed :(", { status: 500 });
+    return new Response("WebSocket upgrade failed :(", { status: 500 });
   },
   websocket: {
     publishToSelf: true,
     open(ws) {
-      ws.subscribe("pixel-updates");
+      ws.subscribe("users");
       ws.send(
         JSON.stringify({
           action: "setCanvas",
@@ -44,6 +44,10 @@ const server = Bun.serve({
     message(ws, messageString) {
       const msg = JSON.parse(messageString as string);
 
+      if (process.env.NODE_ENV === "development") {
+        console.log(msg);
+      }
+
       const paint = (x: number, y: number, color: string) => {
         if (
           x < 0 ||
@@ -55,7 +59,7 @@ const server = Bun.serve({
         }
         canvasState[x][y] = color;
         ws.publish(
-          "pixel-updates",
+          "users",
           JSON.stringify({
             action: "paint",
             x: x,
@@ -85,8 +89,7 @@ const server = Bun.serve({
         if (ws.isSubscribed("admins")) {
           paint(msg.x, msg.y, msg.color);
         }
-      }
-      if (msg.action === "startTransaction") {
+      } else if (msg.action === "startTransaction") {
         const { data } = msg;
         if (data.length <= 0) return;
         const id = randomBytes(4).toString("hex");
@@ -148,6 +151,19 @@ const server = Bun.serve({
             id,
           })
         );
+      } else if (msg.action === "setPrice") {
+        if (!ws.isSubscribed("admins")) return;
+        if (typeof msg.price !== "number") return;
+        pricePerPixel = msg.price;
+        ws.publish(
+          "users",
+          JSON.stringify({
+            action: "setPrice",
+            price: pricePerPixel,
+          })
+        );
+      } else {
+        console.log("Unknown WS message received:", msg);
       }
     },
   },
