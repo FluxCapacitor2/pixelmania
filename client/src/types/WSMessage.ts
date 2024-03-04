@@ -1,9 +1,7 @@
 export type WSMessage =
   | {
-      action: "paint";
-      x: number;
-      y: number;
-      color: string;
+      action: "bulkPaint";
+      data: (string | null)[][];
     }
   | {
       action: "setCanvas";

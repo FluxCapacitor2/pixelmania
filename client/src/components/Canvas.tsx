@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import useWebSocket, { ReadyState } from "react-use-websocket";
 import { WSMessage } from "../types/WSMessage";
@@ -30,8 +30,17 @@ export const Canvas = () => {
       }
     );
 
-  const [canvasState, setCanvasState] = useState<string[][]>(
-    Array.of({ length: width }).map(() => Array.from({ length: height }))
+  const newCanvas = () =>
+    Array(width)
+      .fill(null)
+      .map(() => new Array(height).fill(null));
+
+  const [canvasState, setCanvasState] = useState<(string | null)[][]>(
+    newCanvas()
+  );
+
+  const [localCanvasState, setLocalCanvasState] = useState<(string | null)[][]>(
+    newCanvas()
   );
 
   const ctx = canvasRef.current?.getContext("2d");
@@ -46,9 +55,10 @@ export const Canvas = () => {
 
   const [pricePerPixel, setPrice] = useState(1 / 75);
 
-  const reset = () => {
+  const drawCanvas = (canvas: (string | null)[][]) => {
     if (!ctx) return;
-    canvasState.forEach((row, x) => {
+    ctx.imageSmoothingEnabled = false;
+    canvas.forEach((row, x) => {
       row.forEach((col, y) => {
         if (col) {
           ctx.fillStyle = col;
@@ -60,39 +70,40 @@ export const Canvas = () => {
     });
   };
 
+  const merge = (
+    serverState: (string | null)[][],
+    clientState: (string | null)[][]
+  ) => {
+    let mergedState = structuredClone(serverState);
+    for (let x = 0; x < clientState.length; x++) {
+      for (let y = 0; y < clientState[x].length; y++) {
+        if (clientState[x][y]) mergedState[x][y] = clientState[x][y];
+      }
+    }
+    return mergedState;
+  };
+
+  useEffect(() => {
+    drawCanvas(merge(canvasState, localCanvasState));
+  }, [canvasState, localCanvasState]);
+
   useEffect(() => {
     if (!lastJsonMessage) return;
     console.log(lastJsonMessage);
-    if (lastJsonMessage.action === "paint" && ctx) {
-      ctx.imageSmoothingEnabled = false;
-      const { x, y, color } = lastJsonMessage;
-
-      const newState = structuredClone(canvasState);
-      newState[x][y] = color;
-      setCanvasState(newState);
-
-      ctx.fillStyle = color;
-      ctx.fillRect(x, y, 1, 1);
+    if (lastJsonMessage.action === "bulkPaint" && ctx) {
+      setCanvasState(merge(canvasState, lastJsonMessage.data));
     } else if (lastJsonMessage.action === "setCanvas" && ctx) {
       setIsAdmin(false);
-      const data = lastJsonMessage.data as string[][];
+      const data = lastJsonMessage.data;
       setCanvasState(data);
-      for (let x = 0; x < data.length; x++) {
-        for (let y = 0; y < data[x].length; y++) {
-          if (!data[x][y]) {
-            continue; // This pixel is empty
-          }
-          ctx.fillStyle = data[x][y];
-          ctx.fillRect(x, y, 1, 1);
-        }
-      }
     } else if (lastJsonMessage.action === "approveTransaction") {
       // The transaction was approved!
       setTransactionId(null);
       toast.success("Transaction approved!");
+      setLocalCanvasState(newCanvas());
     } else if (lastJsonMessage.action === "denyTransaction") {
-      reset();
       setTransactionId(null);
+      setLocalCanvasState(newCanvas());
       toast.error(
         "Your transaction was denied. Please visit the table for more information."
       );
@@ -123,9 +134,13 @@ export const Canvas = () => {
 
   const [drawing, setDrawing] = useState(false);
 
-  const [newPixels, setNewPixels] = useState<
-    { x: number; y: number; color: string }[]
-  >([]);
+  const newPixels = useMemo(() => {
+    return localCanvasState.reduce(
+      (sum, row) =>
+        sum + row.reduce((sum, col) => (col !== null ? sum + 1 : sum), 0),
+      0
+    );
+  }, [localCanvasState]);
 
   const [lastDrawPos, setLastDrawPos] = useState<[number, number] | null>(null);
 
@@ -163,44 +178,27 @@ export const Canvas = () => {
   }, [drawing]);
 
   const paintPixel = (x: number, y: number) => {
-    let pixelsToAdd: { x: number; y: number; color: string }[] = [];
+    let newState = structuredClone(localCanvasState);
+
     for (let dx = -thickness; dx < thickness; dx++) {
       for (let dy = -thickness; dy < thickness; dy++) {
-        if (x + dx < 0 || x + dx > width || y + dy < 0 || y + dy > height) {
+        if (x + dx < 0 || x + dx >= width || y + dy < 0 || y + dy >= height) {
           // Don't paint pixels out of bounds
           continue;
         }
 
-        pixelsToAdd.push({
-          x: Math.round(x + dx),
-          y: Math.round(y + dy),
-          color,
-        });
+        newState[Math.round(x + dx)][Math.round(y + dy)] = color;
       }
     }
 
-    setNewPixels([
-      ...newPixels,
-      ...pixelsToAdd.filter(
-        (pixel) =>
-          !newPixels.some((other) => other.x === pixel.x && other.y === pixel.y)
-      ),
-    ]);
-
-    if (ctx) {
-      for (const { x, y, color } of pixelsToAdd) {
-        ctx.fillStyle = color;
-        ctx.fillRect(x, y, 1, 1);
-      }
-    }
+    setLocalCanvasState(newState);
   };
 
   const startTransaction = () => {
     sendJsonMessage({
       action: "startTransaction",
-      data: newPixels,
+      data: localCanvasState,
     });
-    setNewPixels([]);
   };
 
   useEffect(() => {
@@ -262,16 +260,18 @@ export const Canvas = () => {
             <button
               onClick={() => startTransaction()}
               disabled={
-                readyState !== ReadyState.OPEN || newPixels.length === 0
+                readyState !== ReadyState.OPEN ||
+                newPixels === 0 ||
+                transactionId !== null
               }
               className="rounded-md bg-pink-500 disabled:bg-pink-400 hover:bg-pink-600 active:bg-pink-700 transition-colors py-2 px-3 text-white"
             >
-              🖌 Paint {newPixels.length} pixels ($
-              {Math.round(newPixels.length * pricePerPixel * 100) / 100})
+              🖌 Paint {newPixels} pixels ($
+              {Math.round(newPixels * pricePerPixel * 100) / 100})
             </button>
             <button
-              onClick={() => reset()}
-              disabled={newPixels.length === 0}
+              onClick={() => setLocalCanvasState(newCanvas())}
+              disabled={newPixels === 0 || transactionId !== null}
               className="rounded-md bg-gray-500 disabled:bg-gray-400 hover:bg-gray-600 active:bg-gray-700 transition-colors py-2 px-3 text-white"
             >
               Cancel

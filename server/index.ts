@@ -5,10 +5,10 @@ type Color = string;
 type Transaction = {
   id: string;
   pixelCount: number;
-  data: { x: number; y: number; color: string }[];
+  data: (string | null)[][];
 };
 
-let canvasState: Color[][] = [];
+let canvasState: (Color | null)[][] = [];
 let pendingTransactions: Transaction[] = [];
 let pricePerPixel = 1 / 75;
 
@@ -50,27 +50,6 @@ const server = Bun.serve({
         console.log(msg);
       }
 
-      const paint = (x: number, y: number, color: string) => {
-        if (
-          x < 0 ||
-          x >= canvasState.length ||
-          y < 0 ||
-          y >= canvasState[0].length
-        ) {
-          return; // Ignore out-of-bounds pixels
-        }
-        canvasState[x][y] = color;
-        ws.publish(
-          "users",
-          JSON.stringify({
-            action: "paint",
-            x: x,
-            y: y,
-            color: color,
-          })
-        );
-      };
-
       if (msg.action === "login") {
         if (msg.password === process.env.PASSWORD) {
           ws.subscribe("admins");
@@ -87,28 +66,24 @@ const server = Bun.serve({
         } else {
           ws.send(JSON.stringify({ action: "login", result: "failure" }));
         }
-      } else if (msg.action === "paint") {
-        if (ws.isSubscribed("admins")) {
-          paint(msg.x, msg.y, msg.color);
-        }
       } else if (msg.action === "startTransaction") {
-        const { data } = msg;
-        if (data.length <= 0) return;
+        const { data } = msg as { data: (string | null)[][] };
         const id = randomBytes(4).toString("hex");
         ws.data.transactionIds.push(id);
-        pendingTransactions.push({ pixelCount: data.length, id, data });
+        const pixels = pixelCount(data);
+        pendingTransactions.push({ pixelCount: pixels, id, data });
         ws.publish(
           "admins",
           JSON.stringify({
             action: "newTransactionForReview",
-            pixelCount: data.length,
+            pixelCount: pixels,
             id,
           })
         );
         ws.send(
           JSON.stringify({
             action: "newTransaction",
-            pixelCount: data.length,
+            pixelCount: pixels,
             id,
           })
         );
@@ -132,10 +107,16 @@ const server = Bun.serve({
         );
         const pixels = pendingTransactions.find((it) => it.id === id)?.data;
         if (!pixels) return; // unexpected error
-        for (const pixel of pixels) {
-          paint(pixel.x, pixel.y, pixel.color);
-        }
+        canvasState = merge(canvasState, pixels);
         pendingTransactions = pendingTransactions.filter((it) => it.id !== id);
+
+        ws.publish(
+          "users",
+          JSON.stringify({
+            action: "bulkPaint",
+            data: pixels,
+          })
+        );
       } else if (msg.action === "denyTransaction") {
         if (!ws.isSubscribed("admins")) return;
         const { id } = msg;
@@ -188,3 +169,24 @@ const server = Bun.serve({
 });
 
 console.log(`Server running on http://${server.hostname}:${server.port}`);
+
+function pixelCount(arr: (string | null)[][]) {
+  return arr.reduce(
+    (sum, row) =>
+      sum + row.reduce((sum, col) => (col !== null ? sum + 1 : sum), 0),
+    0
+  );
+}
+
+function merge(
+  serverState: (string | null)[][],
+  clientState: (string | null)[][]
+) {
+  let mergedState = structuredClone(serverState);
+  for (let x = 0; x < clientState.length; x++) {
+    for (let y = 0; y < clientState[x].length; y++) {
+      if (clientState[x][y]) mergedState[x][y] = clientState[x][y];
+    }
+  }
+  return mergedState;
+}
