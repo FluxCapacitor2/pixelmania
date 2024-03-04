@@ -1,0 +1,331 @@
+import { useEffect, useRef, useState } from "react";
+import useWebSocket, { ReadyState } from "react-use-websocket";
+import { BrushSizePicker } from "./BrushSizePicker";
+import { ColorPicker } from "./ColorPicker";
+
+const sideLength = 100;
+const width = sideLength;
+const height = sideLength;
+
+type WSMessage =
+  | {
+      action: "paint";
+      x: number;
+      y: number;
+      color: string;
+    }
+  | {
+      action: "setCanvas";
+      data: (string | null)[][];
+    }
+  | {
+      action:
+        | "approveTransaction"
+        | "approveTransactionForReview"
+        | "denyTransaction"
+        | "denyTransactionForReview";
+      id: string;
+    }
+  | {
+      action: "newTransaction" | "newTransactionForReview";
+      id: string;
+      pixelCount: number;
+    }
+  | { action: "login"; result: "success" | "failure" }
+  | { action: "updatePrice"; price: number };
+
+export const Canvas = () => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const { lastJsonMessage, sendJsonMessage, readyState } =
+    useWebSocket<WSMessage>(`ws://${window.location.hostname}:8080/ws`, {
+      retryOnError: true,
+      reconnectAttempts: -1,
+      reconnectInterval: 1000,
+      onOpen: () =>
+        canvasRef.current?.getContext("2d")?.clearRect(0, 0, width, height),
+    });
+
+  const ctx = canvasRef.current?.getContext("2d");
+  const [color, setColor] = useState("red");
+  const [thickness, setThickness] = useState(3);
+  const [transactionId, setTransactionId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  const [transactions, setTransactions] = useState<
+    { id: string; pixelCount: number }[]
+  >([]);
+
+  const [pricePerPixel, setPrice] = useState(1 / 50);
+
+  useEffect(() => {
+    if (!lastJsonMessage) return;
+    console.log(lastJsonMessage);
+    if (lastJsonMessage.action === "paint" && ctx) {
+      ctx.imageSmoothingEnabled = false;
+      const { x, y, color } = lastJsonMessage;
+      ctx.fillStyle = color;
+      ctx.fillRect(x, y, 1, 1);
+    } else if (lastJsonMessage.action === "setCanvas" && ctx) {
+      setIsAdmin(false);
+      const data = lastJsonMessage.data as string[][];
+      for (let x = 0; x < data.length; x++) {
+        for (let y = 0; y < data[x].length; y++) {
+          if (!data[x][y]) {
+            continue; // This pixel is empty
+          }
+          ctx.fillStyle = data[x][y];
+          ctx.fillRect(x, y, 1, 1);
+        }
+      }
+    } else if (lastJsonMessage.action === "approveTransaction") {
+      // The transaction was approved!
+      setTransactionId(null);
+      alert("Transaction approved!");
+    } else if (lastJsonMessage.action === "denyTransaction") {
+      setTransactionId(null);
+      alert(
+        "Your transaction was denied. Please visit the table for more information."
+      );
+    } else if (lastJsonMessage.action === "login") {
+      if (lastJsonMessage.result === "success") {
+        alert("You are now logged in as an admin.");
+        setIsAdmin(true);
+      } else {
+        alert("Incorrect password");
+      }
+    } else if (lastJsonMessage.action === "newTransaction") {
+      if (!isAdmin) {
+        setTransactionId(lastJsonMessage.id);
+      }
+    } else if (lastJsonMessage.action === "newTransactionForReview") {
+      setTransactions([...transactions, lastJsonMessage]);
+    } else if (
+      lastJsonMessage.action === "denyTransactionForReview" ||
+      lastJsonMessage.action === "approveTransactionForReview"
+    ) {
+      setTransactions(
+        transactions.filter((it) => it.id !== lastJsonMessage.id)
+      );
+    } else if (lastJsonMessage.action === "updatePrice") {
+      setPrice(lastJsonMessage.price);
+    }
+  }, [lastJsonMessage]);
+
+  const [drawing, setDrawing] = useState(false);
+
+  const [newPixels, setNewPixels] = useState<
+    { x: number; y: number; color: string }[]
+  >([]);
+
+  const [lastDrawPos, setLastDrawPos] = useState<[number, number] | null>(null);
+
+  const draw = (clientX: number, clientY: number) => {
+    if (!drawing || transactionId !== null) return;
+    const rect = canvasRef.current!.getBoundingClientRect();
+
+    const screenX = clientX - rect.x;
+    const screenY = clientY - rect.y;
+    const [x, y] = [
+      Math.round(screenX * (width / rect.width)),
+      Math.round(screenY * (height / rect.height)),
+    ];
+    setLastDrawPos([x, y]);
+
+    console.log(lastDrawPos, [x, y]);
+
+    if (lastDrawPos) {
+      const dx = x - lastDrawPos[0];
+      const dy = y - lastDrawPos[1];
+      let greatestDifferential = Math.max(Math.abs(dx), Math.abs(dy));
+      console.log("delta", dx, dy, "0<=t<=", greatestDifferential);
+      for (let t = 0; t < Math.abs(greatestDifferential); t++) {
+        paintPixel(
+          lastDrawPos[0] + (dx / greatestDifferential) * t,
+          lastDrawPos[1] + (dy / greatestDifferential) * t
+        );
+      }
+    }
+
+    paintPixel(x, y);
+  };
+
+  useEffect(() => {
+    if (!drawing) {
+      setLastDrawPos(null);
+    }
+  }, [drawing]);
+
+  const paintPixel = (x: number, y: number) => {
+    let pixelsToAdd: { x: number; y: number; color: string }[] = [];
+    for (let dx = -thickness; dx < thickness; dx++) {
+      for (let dy = -thickness; dy < thickness; dy++) {
+        if (x + dx < 0 || x + dx > width || y + dy < 0 || y + dy > height)
+          continue;
+
+        pixelsToAdd.push({
+          x: Math.round(x + dx),
+          y: Math.round(y + dy),
+          color,
+        });
+      }
+    }
+
+    setNewPixels([
+      ...newPixels,
+      ...pixelsToAdd.filter(
+        (pixel) =>
+          !newPixels.some((other) => other.x === pixel.x && other.y === pixel.y)
+      ),
+    ]);
+
+    if (ctx) {
+      for (const { x, y, color } of pixelsToAdd) {
+        ctx.fillStyle = color;
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+  };
+
+  const startTransaction = () => {
+    sendJsonMessage({
+      action: "startTransaction",
+      data: newPixels,
+    });
+    setNewPixels([]);
+  };
+
+  if (readyState !== ReadyState.OPEN) {
+    return <p>Connecting...</p>;
+  }
+
+  return (
+    <>
+      <section className="flex flex-col items-center gap-4">
+        {transactionId !== null && (
+          <div className="rounded-md border-2 bg-green-200 p-4">
+            <p className="max-w-md">
+              Your request has been submitted! Come to the table to complete the
+              transaction. Your transaction ID is: <b>{transactionId}</b>
+            </p>
+          </div>
+        )}
+        <canvas
+          ref={canvasRef}
+          width={width}
+          height={height}
+          className="border rounded-sm w-96 h-96 [image-rendering:pixelated]"
+          onMouseDown={(e) => {
+            setDrawing(true);
+            console.log("Drawing at ", e);
+            draw(e.clientX, e.clientY);
+          }}
+          onTouchStart={(e) => {
+            e.preventDefault();
+            setDrawing(true);
+            if (e.touches?.[0]) {
+              draw(e.touches[0].clientX, e.touches[0].clientY);
+            }
+            return false; // for iOS - see https://stackoverflow.com/a/9975966
+          }}
+          onClick={(e) => {
+            setDrawing(true);
+
+            draw(e.clientX, e.clientY);
+            setDrawing(false);
+          }}
+          onMouseMove={(e) => {
+            draw(e.clientX, e.clientY);
+          }}
+          onTouchMove={(e) => draw(e.touches[0].clientX, e.touches[0].clientY)}
+          onMouseUp={() => setDrawing(false)}
+          onMouseLeave={() => setDrawing(false)}
+          onTouchEnd={() => setDrawing(false)}
+        />
+        <div className="flex gap-4 items-center">
+          <BrushSizePicker setThickness={setThickness} />
+          <div className="w-px h-full scale-y-125 bg-gray-400">&nbsp;</div>
+          <ColorPicker setColor={setColor} />
+        </div>
+        {transactionId === null && (
+          <button
+            onClick={() => startTransaction()}
+            className="rounded-md bg-pink-500 hover:bg-pink-600 active:bg-pink-700 transition-colors py-2 px-3 text-white"
+          >
+            🖌 Paint {newPixels.length} pixels ($
+            {Math.round(newPixels.length * pricePerPixel * 100) / 100})
+          </button>
+        )}
+        {!isAdmin && (
+          <input
+            type="text"
+            placeholder="Admin password..."
+            className="fixed bottom-1 right-1"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                sendJsonMessage({
+                  action: "login",
+                  password: e.currentTarget.value,
+                });
+              }
+            }}
+          />
+        )}
+      </section>
+      {isAdmin && (
+        <section className="flex flex-col gap-4 h-full items-start justify-start border rounded-md p-4">
+          <h2 className="text-lg font-bold font-mono">Admin</h2>
+          <input
+            type="text"
+            placeholder="Set price..."
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                sendJsonMessage({
+                  action: "setPrice",
+                  price: e.currentTarget.valueAsNumber,
+                });
+              }
+            }}
+          />
+          {transactions.length === 0 && <p>No pending transactions.</p>}
+          {transactions.map((transaction) => (
+            <div className="border rounded-md p-4" key={transaction.id}>
+              <h2 className="text-lg font-mono font-bold">
+                Transaction {transaction.id}
+              </h2>
+              <p>
+                {transaction.pixelCount} pixels &middot; $
+                {Math.round(transaction.pixelCount * pricePerPixel * 100) / 100}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() =>
+                    sendJsonMessage({
+                      action: "approveTransaction",
+                      id: transaction.id,
+                    })
+                  }
+                  className="bg-green-400 rounded-md px-2 py-1"
+                >
+                  Approve
+                </button>
+                <button
+                  onClick={() =>
+                    sendJsonMessage({
+                      action: "denyTransaction",
+                      id: transaction.id,
+                    })
+                  }
+                  className="bg-red-400 rounded-md px-2 py-1"
+                >
+                  Reject
+                </button>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
+    </>
+  );
+};
