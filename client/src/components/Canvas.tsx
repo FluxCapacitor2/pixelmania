@@ -1,39 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import useWebSocket, { ReadyState } from "react-use-websocket";
+import { WSMessage } from "../types/WSMessage";
 import { BrushSizePicker } from "./BrushSizePicker";
 import { ColorPicker } from "./ColorPicker";
 
 const sideLength = 100;
 const width = sideLength;
 const height = sideLength;
-
-type WSMessage =
-  | {
-      action: "paint";
-      x: number;
-      y: number;
-      color: string;
-    }
-  | {
-      action: "setCanvas";
-      data: (string | null)[][];
-    }
-  | {
-      action:
-        | "approveTransaction"
-        | "approveTransactionForReview"
-        | "denyTransaction"
-        | "denyTransactionForReview";
-      id: string;
-    }
-  | {
-      action: "newTransaction" | "newTransactionForReview";
-      id: string;
-      pixelCount: number;
-    }
-  | { action: "login"; result: "success" | "failure" }
-  | { action: "updatePrice"; price: number };
 
 export const Canvas = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -56,6 +30,10 @@ export const Canvas = () => {
       }
     );
 
+  const [canvasState, setCanvasState] = useState<string[][]>(
+    Array.of({ length: width }).map(() => Array.from({ length: height }))
+  );
+
   const ctx = canvasRef.current?.getContext("2d");
   const [color, setColor] = useState("red");
   const [thickness, setThickness] = useState(3);
@@ -68,17 +46,37 @@ export const Canvas = () => {
 
   const [pricePerPixel, setPrice] = useState(1 / 75);
 
+  const reset = () => {
+    if (!ctx) return;
+    canvasState.forEach((row, x) => {
+      row.forEach((col, y) => {
+        if (col) {
+          ctx.fillStyle = col;
+          ctx.fillRect(x, y, 1, 1);
+        } else {
+          ctx.clearRect(x, y, 1, 1);
+        }
+      });
+    });
+  };
+
   useEffect(() => {
     if (!lastJsonMessage) return;
     console.log(lastJsonMessage);
     if (lastJsonMessage.action === "paint" && ctx) {
       ctx.imageSmoothingEnabled = false;
       const { x, y, color } = lastJsonMessage;
+
+      const newState = structuredClone(canvasState);
+      newState[x][y] = color;
+      setCanvasState(newState);
+
       ctx.fillStyle = color;
       ctx.fillRect(x, y, 1, 1);
     } else if (lastJsonMessage.action === "setCanvas" && ctx) {
       setIsAdmin(false);
       const data = lastJsonMessage.data as string[][];
+      setCanvasState(data);
       for (let x = 0; x < data.length; x++) {
         for (let y = 0; y < data[x].length; y++) {
           if (!data[x][y]) {
@@ -93,6 +91,7 @@ export const Canvas = () => {
       setTransactionId(null);
       toast.success("Transaction approved!");
     } else if (lastJsonMessage.action === "denyTransaction") {
+      reset();
       setTransactionId(null);
       toast.error(
         "Your transaction was denied. Please visit the table for more information."
@@ -117,7 +116,7 @@ export const Canvas = () => {
       setTransactions(
         transactions.filter((it) => it.id !== lastJsonMessage.id)
       );
-    } else if (lastJsonMessage.action === "updatePrice") {
+    } else if (lastJsonMessage.action === "setPrice") {
       setPrice(lastJsonMessage.price);
     }
   }, [lastJsonMessage]);
@@ -131,7 +130,7 @@ export const Canvas = () => {
   const [lastDrawPos, setLastDrawPos] = useState<[number, number] | null>(null);
 
   const draw = (clientX: number, clientY: number) => {
-    if (!drawing || transactionId !== null) return;
+    if (transactionId !== null) return;
     const rect = canvasRef.current!.getBoundingClientRect();
 
     const screenX = clientX - rect.x;
@@ -206,7 +205,7 @@ export const Canvas = () => {
 
   useEffect(() => {
     if (readyState !== ReadyState.OPEN) {
-      toast.loading("Reconnecting...", {
+      toast.loading("Connecting...", {
         duration: 60000,
         id: "reconnecting",
       });
@@ -230,10 +229,9 @@ export const Canvas = () => {
           ref={canvasRef}
           width={width}
           height={height}
-          className="border rounded-sm w-96 h-96 [image-rendering:pixelated]"
+          className="border rounded-sm min-h-[70vh] aspect-square [image-rendering:pixelated]"
           onMouseDown={(e) => {
             setDrawing(true);
-            console.log("Drawing at ", e);
             draw(e.clientX, e.clientY);
           }}
           onTouchStart={(e) => {
@@ -244,16 +242,12 @@ export const Canvas = () => {
             }
             return false; // for iOS - see https://stackoverflow.com/a/9975966
           }}
-          onClick={(e) => {
-            setDrawing(true);
-
-            draw(e.clientX, e.clientY);
-            setDrawing(false);
-          }}
           onMouseMove={(e) => {
-            draw(e.clientX, e.clientY);
+            if (drawing) draw(e.clientX, e.clientY);
           }}
-          onTouchMove={(e) => draw(e.touches[0].clientX, e.touches[0].clientY)}
+          onTouchMove={(e) => {
+            if (drawing) draw(e.touches[0].clientX, e.touches[0].clientY);
+          }}
           onMouseUp={() => setDrawing(false)}
           onMouseLeave={() => setDrawing(false)}
           onTouchEnd={() => setDrawing(false)}
@@ -264,19 +258,32 @@ export const Canvas = () => {
           <ColorPicker setColor={setColor} />
         </div>
         {transactionId === null && (
-          <button
-            onClick={() => startTransaction()}
-            className="rounded-md bg-pink-500 hover:bg-pink-600 active:bg-pink-700 transition-colors py-2 px-3 text-white"
-          >
-            🖌 Paint {newPixels.length} pixels ($
-            {Math.round(newPixels.length * pricePerPixel * 100) / 100})
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => startTransaction()}
+              disabled={
+                readyState !== ReadyState.OPEN || newPixels.length === 0
+              }
+              className="rounded-md bg-pink-500 disabled:bg-pink-400 hover:bg-pink-600 active:bg-pink-700 transition-colors py-2 px-3 text-white"
+            >
+              🖌 Paint {newPixels.length} pixels ($
+              {Math.round(newPixels.length * pricePerPixel * 100) / 100})
+            </button>
+            <button
+              onClick={() => reset()}
+              disabled={newPixels.length === 0}
+              className="rounded-md bg-gray-500 disabled:bg-gray-400 hover:bg-gray-600 active:bg-gray-700 transition-colors py-2 px-3 text-white"
+            >
+              Cancel
+            </button>
+          </div>
         )}
         {!isAdmin && (
           <input
             type="text"
             placeholder="Admin password..."
             className="fixed bottom-1 right-1"
+            disabled={readyState !== ReadyState.OPEN}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -294,6 +301,7 @@ export const Canvas = () => {
           <h2 className="text-lg font-bold font-mono">Admin</h2>
           <input
             type="text"
+            disabled={readyState !== ReadyState.OPEN}
             placeholder="Set price..."
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -322,7 +330,8 @@ export const Canvas = () => {
                       id: transaction.id,
                     })
                   }
-                  className="bg-green-400 rounded-md px-2 py-1"
+                  className="bg-green-400 rounded-md px-2 py-1 disabled:bg-green-300"
+                  disabled={readyState !== ReadyState.OPEN}
                 >
                   Approve
                 </button>
@@ -333,7 +342,8 @@ export const Canvas = () => {
                       id: transaction.id,
                     })
                   }
-                  className="bg-red-400 rounded-md px-2 py-1"
+                  className="bg-red-400 rounded-md px-2 py-1 disabled:bg-red-300"
+                  disabled={readyState !== ReadyState.OPEN}
                 >
                   Reject
                 </button>

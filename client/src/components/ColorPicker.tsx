@@ -2,13 +2,15 @@ import { Dispatch } from "react";
 
 export const ColorPicker = ({ setColor }: { setColor: Dispatch<string> }) => {
   const colors = [
+    "black",
     "red",
     "orange",
     "yellow",
     "green",
     "blue",
-    "indigo",
-    "violet",
+    "dodgerblue",
+    "purple",
+    "pink",
     "white",
   ];
 

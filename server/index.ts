@@ -1,3 +1,4 @@
+import { WebSocketHandler } from "bun";
 import { randomBytes } from "crypto";
 
 type Color = string;
@@ -27,6 +28,7 @@ const server = Bun.serve({
   websocket: {
     publishToSelf: true,
     open(ws) {
+      ws.data = { transactionIds: [] };
       ws.subscribe("users");
       ws.send(
         JSON.stringify({
@@ -51,9 +53,9 @@ const server = Bun.serve({
       const paint = (x: number, y: number, color: string) => {
         if (
           x < 0 ||
-          x > canvasState.length ||
+          x >= canvasState.length ||
           y < 0 ||
-          y > canvasState[0].length
+          y >= canvasState[0].length
         ) {
           return; // Ignore out-of-bounds pixels
         }
@@ -93,6 +95,7 @@ const server = Bun.serve({
         const { data } = msg;
         if (data.length <= 0) return;
         const id = randomBytes(4).toString("hex");
+        ws.data.transactionIds.push(id);
         pendingTransactions.push({ pixelCount: data.length, id, data });
         ws.publish(
           "admins",
@@ -166,7 +169,22 @@ const server = Bun.serve({
         console.log("Unknown WS message received:", msg);
       }
     },
-  },
+    close(ws, code, reason) {
+      // Clear transactions from users once they disconnect
+      ws.data.transactionIds?.forEach((transaction) => {
+        pendingTransactions = pendingTransactions.filter(
+          (it) => it.id !== transaction
+        );
+        ws.publish(
+          "admins",
+          JSON.stringify({
+            action: "denyTransactionForReview",
+            id: transaction,
+          })
+        );
+      });
+    },
+  } satisfies WebSocketHandler<{ transactionIds: string[] }>,
 });
 
 console.log(`Server running on http://${server.hostname}:${server.port}`);
