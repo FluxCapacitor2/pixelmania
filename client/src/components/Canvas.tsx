@@ -40,8 +40,14 @@ export const Canvas = () => {
   );
 
   const [localCanvasState, setLocalCanvasState] = useState<(string | null)[][]>(
-    newCanvas()
+    JSON.parse(
+      localStorage.getItem("client_state") ?? JSON.stringify(newCanvas())
+    )
   );
+
+  useEffect(() => {
+    localStorage.setItem("client_state", JSON.stringify(localCanvasState));
+  }, [localCanvasState]);
 
   const ctx = canvasRef.current?.getContext("2d");
   const [color, setColor] = useState<string | null>("black");
