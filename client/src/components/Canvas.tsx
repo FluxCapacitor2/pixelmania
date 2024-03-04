@@ -38,13 +38,17 @@ export const Canvas = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const { lastJsonMessage, sendJsonMessage, readyState } =
-    useWebSocket<WSMessage>(`ws://${window.location.hostname}:8080/ws`, {
-      retryOnError: true,
-      reconnectAttempts: -1,
-      reconnectInterval: 1000,
-      onOpen: () =>
-        canvasRef.current?.getContext("2d")?.clearRect(0, 0, width, height),
-    });
+    useWebSocket<WSMessage>(
+      import.meta.env.VITE_SERVER_URL ??
+        `ws://${window.location.hostname}:8080/ws`,
+      {
+        retryOnError: true,
+        reconnectAttempts: -1,
+        reconnectInterval: 1000,
+        onOpen: () =>
+          canvasRef.current?.getContext("2d")?.clearRect(0, 0, width, height),
+      }
+    );
 
   const ctx = canvasRef.current?.getContext("2d");
   const [color, setColor] = useState("red");
