@@ -9,5 +9,10 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      document.body.addEventListener("touchstart", (e) => e.preventDefault());
+      document.body.addEventListener("touchmove", (e) => e.preventDefault());
+      document.body.addEventListener("touchend", (e) => e.preventDefault());
+    </script>
   </body>
 </html>

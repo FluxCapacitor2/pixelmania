@@ -227,7 +227,7 @@ export const Canvas = () => {
           ref={canvasRef}
           width={width}
           height={height}
-          className="border rounded-sm min-h-[70vh] aspect-square [image-rendering:pixelated]"
+          className="border rounded-sm w-[95vw] md:w-auto md:min-h-[70vh] aspect-square [image-rendering:pixelated]"
           onMouseDown={(e) => {
             setDrawing(true);
             draw(e.clientX, e.clientY);
