@@ -45,7 +45,12 @@ export const Canvas = () => {
       {
         retryOnError: true,
         reconnectAttempts: -1,
-        reconnectInterval: 1000,
+        reconnectInterval: 100,
+        onClose() {
+          toast.error("There was a problem connecting to the server!", {
+            duration: 3000,
+          });
+        },
         onOpen: () =>
           canvasRef.current?.getContext("2d")?.clearRect(0, 0, width, height),
       }
@@ -199,9 +204,16 @@ export const Canvas = () => {
     setNewPixels([]);
   };
 
-  if (readyState !== ReadyState.OPEN) {
-    return <p>Connecting...</p>;
-  }
+  useEffect(() => {
+    if (readyState !== ReadyState.OPEN) {
+      toast.loading("Reconnecting...", {
+        duration: 60000,
+        id: "reconnecting",
+      });
+    } else {
+      toast.success("Connected!", { id: "reconnecting", duration: 500 });
+    }
+  }, [readyState]);
 
   return (
     <>
