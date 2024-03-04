@@ -37,7 +37,7 @@ const server = Bun.serve({
       ws.send(
         JSON.stringify({
           action: "setPrice",
-          data: pricePerPixel,
+          price: pricePerPixel,
         })
       );
     },
