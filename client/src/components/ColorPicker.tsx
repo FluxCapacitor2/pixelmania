@@ -1,6 +1,10 @@
 import { Dispatch } from "react";
 
-export const ColorPicker = ({ setColor }: { setColor: Dispatch<string> }) => {
+export const ColorPicker = ({
+  setColor,
+}: {
+  setColor: Dispatch<string | null>;
+}) => {
   const colors = [
     "black",
     "red",
@@ -11,7 +15,7 @@ export const ColorPicker = ({ setColor }: { setColor: Dispatch<string> }) => {
     "dodgerblue",
     "purple",
     "pink",
-    "white",
+    null,
   ];
 
   return (
@@ -20,9 +24,9 @@ export const ColorPicker = ({ setColor }: { setColor: Dispatch<string> }) => {
         <button
           key={color}
           className={`w-5 h-5 rounded-md ${
-            color === "white" && "border-2 border-black"
+            color === null && "border-2 border-black"
           }`}
-          style={{ backgroundColor: color }}
+          style={{ backgroundColor: color ?? "transparent" }}
           onClick={() => setColor(color)}
         />
       ))}

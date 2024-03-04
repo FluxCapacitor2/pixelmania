@@ -44,8 +44,8 @@ export const Canvas = () => {
   );
 
   const ctx = canvasRef.current?.getContext("2d");
-  const [color, setColor] = useState("red");
-  const [thickness, setThickness] = useState(3);
+  const [color, setColor] = useState<string | null>("black");
+  const [thickness, setThickness] = useState(1);
   const [transactionId, setTransactionId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
